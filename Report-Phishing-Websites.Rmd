@@ -1,0 +1,1031 @@
+---
+title: "Detection of Phishing Websites using Machine Learning Algorithms"
+author: "Naman Agrawal"
+date: "December 26, 2020"
+output:
+ pdf_document:
+    toc: true
+    toc_depth: 4
+always_allow_html: true
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r installing-packages, echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+if(!"tinytex" %in% installed.packages()) { tinytex::install_tinytex()} #installing tinytex
+
+# List of packages for the project
+packages = c("tidyverse",      
+              "RWeka",  
+              "Hmisc",
+              "caret",
+              "tidyr",
+              "purrr",
+              "party",
+              "partykit",
+              "gam",
+              "MLmetrics",
+              "e1071",
+              "Rborist",
+              "randomForest",
+              "LiblineaR",
+              "lubridate",
+              "knitr",
+              "ggcorrplot",
+              "gbm",
+              "xfun",
+              "reactable",
+              "kableExtra",
+              "lemon"
+              )
+
+# Install CRAN packages (if not already installed)
+inst <- packages %in% installed.packages()
+if(length(packages[!inst]) > 0) install.packages(packages[!inst], repos = "http://cran.us.r-project.org")
+```
+
+\newpage
+
+## Executive Summary
+The purpose of this project is to use different machine learning approaches to come up with suitable algorithms for the detection of phishing websites. The project will first provide an introduction to phishing. This is followed by a description of the data set used to build the algorithms. Some exploratory data analysis has also been done to provide a qualitative and quantitative explanation of the various characteristics of the data set. The project then illustrates the various machine learning algorithms that will be used for prediction. A comparative analysis of these algorithms has also been done. The project concludes with a brief overview of the results and highlights some future considerations.  
+
+\newpage
+
+## Introduction
+With rapid advancements in the field of digital technology and software-systems, various issues related to cyber-safety have been gaining importance. One of the most common issues in this regard is Personal Identity Theft. Identity theft simply means one person taking the identity of another person.  
+
+One of the most common forms of identity theft is phishing. Phishing involves tempting the target to reveal sensitive information such as passwords, codes, account details, etc, which may be used for illegal activities. Through emails, messages, calls, etc, the users may be directed to fake websites where they unknowingly reveal personal information. These websites are called phishing websites. They are designed to imitate legitimate websites but use subterfuge to gather details. However, there are certain features which can be used to differentiate phishing and legitimate websites. Though these features are no definite rule, they can be exploited through appropriate manipulation and implementation of suitable algorithms to predict website legitimacy to a reasonable accuracy.  
+
+The project will be based on the following methodology:  
+
+1. The data set is downloaded and pre-processed to choose features which show high correlation with the outcome.
+2. The selected features are analyzed individually to garner important information regarding their distribution, prevalence, etc.
+3. Data set is split into train and test sets. The train set is used to build the algorithms and the test set is used exclusively for testing. 
+4. Algorithms are constructed with the distinguishing features as the predictors and the result indicating whether the given website is phishing or legitimate.
+5. The most suitable algorithm (maximum accuracy for train and test set) is chosen.  
+
+The project will use R for all of the above-mentioned tasks. The following libraries are required:  
+
+```{r loading-packages, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+library(tidyverse)
+library(RWeka)
+library(Hmisc)
+library(caret)
+library(tidyr)
+library(purrr)
+library(party)
+library(partykit)
+library(gam)
+library(e1071)
+library(Rborist)
+library(randomForest)
+library(LiblineaR)
+library(lubridate)
+library(knitr)
+library(ggcorrplot)
+library(gbm)
+library(xfun)
+library(reactable)
+library(kableExtra)
+library(tinytex)
+library(MLmetrics)
+library(lemon)
+```
+
+\newpage
+
+## Data Set Description
+The data set used for this project has been downloaded from the [UCI Machine Learning Repository](https://archive.ics.uci.edu/ml/datasets/Phishing+Websites). It has been provided by Rami Mustafa A Mohammad, Lee McCluskey, and Fadi Thabtah. The data set can be downloaded and saved in '.rda' format by the following code:  
+
+```{r extracting-data, echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+#File URL
+url <- 
+"https://archive.ics.uci.edu/ml/machine-learning-databases/00327/Training%20Dataset.arff"
+
+#Creating a temporary file name
+temp <- tempfile()
+
+#Downloading the file.
+download.file(url,temp)
+
+#Reading the file into an R object
+phishing <- read.arff(temp)
+
+#remove the temporary file
+unlink(temp)
+
+```
+
+There are 31 attributes in this data set. The 31st attribute is 'Result', which is the outcome (indicating whether the website is actually phishing or legitimate). There are 11,055 observations in the data set. All values are categorical in nature, and comprise two/three levels indicating that the website may be phishing (-1), suspicious (0), or legitimate (1).  
+
+Before analysis, the data set is pre-processed to only include those attributes which show a strong correlation with the result (>=0.2) and a significant associated p-value (<=0.05). This allows us to not only choose the best predictors, but also avoid long computational time due to several predictors. The figure below shows the correlation coefficient for the 30 attributes with respect to 'Result'.  
+
+&nbsp;
+```{r, corrlation-plot, echo=FALSE, message=FALSE, warning=FALSE, fig.align="center"}
+
+#Calculating the pearson correlation coefficient and associated p value for each variable with the Results
+correlation_matrix <- rcorr(as.matrix(phishing), type="pearson")
+r <- correlation_matrix$r
+p <- correlation_matrix$P
+
+#Making data frame of correlation coefficient and p values for Results with other attributes/predictors.
+rp <- cbind(r, p) 
+rp <- rp[,c(31, 62)] # Selecting only columns for correlation with Result
+colnames(rp) <- c("r", "p") #Naming the columns
+rp <- as.data.frame(rp) %>% mutate(significant=(p<=0.05), strong_r=(r>=0.2))
+attribute <- colnames(phishing)
+rp <- cbind(attribute, rp) #Essentially, adding a column to indicate the predictor.
+rp <- rp[-c(31),] #Removing Result row from the data frame as we do not want to see the correlation of Result with result itself
+
+
+#Plotting a scatter plot of the attributes (predictor) with their correlation coefficient with Result. 
+#The color is used to indicate if the given attribute has a strong correlation (r>=0.2) with Result.
+#The shape is used to indicate if the p value of the correlation coefficient of the attributes are significant (p=<0.05).
+
+plot1<-rp %>% ggplot(aes(x=attribute, y=r, shape=significant, col=strong_r)) + 
+  geom_point(size=5) +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1), 
+        plot.title = element_text(hjust = 0.5)) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(title="Correlation Plot of Features with Result",
+       x="Features",
+       y="Correlation Coeffecient",
+       col="Strong Correlation?", 
+       shape="Significant p-value?")
+plot1
+```
+
+```{r load-phish, echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+
+#Choosing the 8 attributes (to be used as predictors) that have satisfied the above criteria. 
+to_choose<-(rp %>% 
+  mutate(choose=(significant==TRUE & strong_r==TRUE)) %>% 
+  filter(choose==TRUE))$attribute
+
+#A final data set with those 8 attributes and Result is created and named 'phish'. This data set will be used for analysis and prediction.
+phish<-phishing %>% select(to_choose, Result)
+
+```
+
+In this plot, the 8 orange triangles indicate the features which show a high degree of correlation which significant p-values. These are the variables that will be selected from the phishing data set to be used for analysis and prediction. The final data set is called 'phish'. It has 9 attributes:  
+
+&nbsp;
+```{r attribute-information, echo=FALSE, message=FALSE, warning=FALSE,}
+
+#Creating a data frame with the information about various attributes:
+
+df <- data.frame(Attribute = c(colnames(phish)), 
+               Value_Set = c("{-1,1}", "{-1, 0, 1}", "{-1, 0, 1}", "{-1, 1}", "{-1, 0, 1}", 
+                                 "{-1, 0, 1}", "{-1, 0, 1}", "{-1, 0, 1}", "{-1, 1}"),
+               Explanation = c( "Hyphens are rarely used in legitimate URLs. Phishers tend to add prefixes or suffixes separated by hyphen from the domain name to trick users into assuming that they are dealing with a legitimate webpage. If the domain name part includes hyphen, the value is '-1' (indicating phishing). Otherwise, the value is '1' (indicating legitimate).",
+                              
+                              "The number of dots in the URL is counted after omiting the 'www.' and the country-code top-level domain (ccTLD). If the number of dots so counted is 1, the attribute is given a value '1' (indicating legitimate). If the number of dots is 2, the value is '0' (indicating suspicious). If the number of dots is more than 2, the value is '-1' (indicating phishing).",
+                              
+                              "SSL stands for Secure Sockets Layer. The certificate assigned with HTTPS is thououghly checked. The minimum age of a reputable certificate is two years. If the website uses https, the issuer is trusted and the age of certificate is more than 1 year, the value of the attribute is '1' (indicating legitimate). If the website uses https and the issuer is not trusted, the value is '0' (indicating suspicious). Otherwise, the value is '-1' (indicating phishing).",
+                              "Request URL examines whether the external objects contained within a webpage such as images, videos and sounds are loaded from another domain. In legitimate webpages, the webpage address and most of objects embedded within the webpage are sharing the same domain. If request URLs loaded from other domains are less than 22%, the value of the attribute is '1' (indicating legitimate). If they are more than or equal to 22%, but less than 61%, the value is '0' (indicating suspicious). Otherwise, the value is '-1' (indicating phishing). In our data set, none of the websites are given the value 0. Hence, the possible values are only 1 and -1." ,
+                              
+                              "An anchor is an element defined by the <a> tag. It is examined if the <a> tags and the website have different domain names and if the anchors link to any webpage. If such anchors are less than 31%, the attribute value is '1' (indicating legitimate). If they are more than or equal to 31%, but less than 67%, the value is '0' (indicating suspicious). Otherwise, the value is '-1' (indicating phishing).",
+                              
+                              "It is common for legitimate websites to use <Meta> tags to offer metadata about the HTML document, <Script> tags to create a client side script, and <Link> tags to retrieve other web resources. If the links in such tags are less than 17%, the attribute value is '1' (indicating legitimate). If they are more than or equal to 17%, but less than 81%, the value is '0' (indicating suspicious). Otherwise, the value is '-1' (indicating phishing).",
+                              
+                              "SFH stands for Server Form Handler.If the SFHs contain an empty string or 'about$:$blank' the attribute is assigned a value of '-1' (indicating phishing). If the domain name in SFHs are differnet from the domain name of the webpage, the value is '0' (indicating suspicious). Otherwise, the value is '1' (indicating legitimate).",
+                              
+                              "Website traffic models the popularity of the website in terms of website rank (depending on the number of visitors and the number of pages they visit). If the website rank is less than 100,000, the attribute value is '1' (indicating legitimate). If the website rank is greater than 100,000, the value is '0' (indicating suspicious). Otherwise, (if the domain has no traffic or is not recognized by the database), the value is '-1' (indicating phishing).",
+                              
+                              "Result is the outcome. If the website is actually legitimate, the value is '1'. Otherwise, it is given a value of '-1'."
+               ))
+
+#Using kbl() function to create a beautiful table.
+library(kableExtra)
+kbl(df, longtable=T, booktabs=T, caption="Attributes Information") %>%
+  column_spec(1, width="3.5cm") %>%
+  column_spec(2, width="2cm") %>%
+  column_spec(3, width="10cm") %>%
+  kable_styling(latex_options=c("repeat_header"))
+```
+&nbsp;
+&nbsp;
+
+The first 6 rows of the data set 'phish' has been displayed for viewing here.  
+
+```{r view-phish, echo=FALSE, message=FALSE, warning=FALSE}
+#Using kbl to cretae a nice table showing the first 6 rows of phish:
+library(kableExtra)
+kbl(head(phish), longtable=T, booktabs=T, caption="First 6 Rows of the Data Set") %>%
+  column_spec(1:9, width="1.5cm") %>%
+  kable_styling(latex_options=c("repeat_header")) %>%
+  row_spec(0, angle= 45 )
+```
+
+\newpage
+
+## Exploratory Data Analysis
+
+The correlation among the variables in the final pre-processed data set can be described by the following correlation heat map:  
+&nbsp;
+```{r correlation-heatmap, message=FALSE, warning=FALSE, echo=FALSE, out.width="60%", fig.align="center"}
+#Creating a correlation matrix and converting it to a data frame:
+phish_numeric_corr<-data.frame(apply(phish, 2, function(x) as.numeric(as.character(x)))) %>% select(-Result)
+
+corr <- round(cor(phish_numeric_corr), 1)
+p.mat <- cor_pmat(phish_numeric_corr)
+
+#Making the correlation heat map:
+ggcorrplot(corr, hc.order = TRUE, type = "lower",
+           lab = TRUE, p.mat = p.mat, legend.title = "Correlation") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title="Correlation Heatmap for Selected Features",
+       caption="X indicates that the correlation is insignificat (95% C.I.)") +
+  scale_color_brewer(palette = "Dark2")
+```
+&nbsp;
+&nbsp;
+
+The project shall now examine some noteworthy characteristics of the data set. The prevalence (proportion of phishing websites in the data set) can be calculated as follows:  
+
+```{r prevalence-phish, message=FALSE, warning=FALSE, echo=TRUE, out.width="60%"}
+#Finding the proportion of '-1's in the data set:
+phish %>% summarise(pi = mean(Result == -1)) %>% pull(pi)
+```
+
+As the prevalence is close to 0.5, the number of legitimate websites in only slightly more than the number of phishing websites. The same can be visualized through the following bar plot:  
+
+&nbsp;
+```{r result-count, message=FALSE, warning=FALSE, echo=FALSE, out.width="60%", fig.align="center", out.height='30%'}
+
+result_count <- phish %>% ggplot(aes(x=Result)) + 
+  geom_bar(stat = "count") + 
+  scale_color_brewer(palette = "Dark2") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title="Total Number of Phishing and Legitimate Websites in Dataset",
+       x="Website Type",
+       y="Count") +
+  scale_x_discrete(labels=c("Phishing", "Legitimate")) +
+  stat_count(geom = "text", colour = "white", size = 5,
+             aes(label = ..count..),position=position_stack(vjust=0.5))
+result_count
+
+```
+&nbsp;
+&nbsp;
+
+To understand the distribution of the features of the data set and to give an idea of the actual outcomes with respect to the indicated outcome, the following plot has been made:  
+&nbsp;
+```{r feature-distribution, message=FALSE, warning=FALSE, echo=FALSE, fig.height=7.5, fig.width=6, fig.align="center"}
+
+phish2<-phish %>% mutate(Result=ifelse(Result==-1, "Phishing (-1)", "Legitimate (1)"))# Done just to change the text in legend.
+
+all_variables<-gather(phish2, key="key", "value",-Result) %>% 
+  ggplot(aes(x=value, fill=Result)) + 
+  facet_wrap(~ key, scales = "free", ncol=3) + 
+  geom_bar() + 
+  scale_color_brewer(palette = "Dark2") +
+  theme(plot.title = element_text(hjust = 0.5, size = 9)) +
+  labs(title="Distribution of Results by Attributes",
+       x="Website Type Indicated\n-1: Phishing, 0: Suspicious, 1: Legitimate",
+       y="Count",
+       fill="Actual Result")
+
+all_variables %>% reposition_legend('center', panel='panel-3-3')
+
+```
+&nbsp;
+&nbsp;
+
+\newpage
+
+## Machine Learning Algorithms  
+
+Different machine learning algorithms are used to predict whether a given website is phishing or not based on the 8 features described above. Before using the algorithms, the data set will have to be split into test and train sets. The train set will be used to build the algorithm and chose optimal parameters, while the test set will be used solely for evaluating the algorithm. The following code enables us to split our data set into two equal parts:  
+
+```{r data-split, message=FALSE, warning=FALSE}
+#Setting the seed to 820. This will be done everywhere to have uniformity in prediction.
+set.seed(820, sample.kind = "Rounding")
+
+y <- phish$Result
+#Creating the text index:
+test_index <- createDataPartition(y, times = 1, p = 0.5, list = FALSE)
+
+#Creating the test and training sets:
+test_set <- phish[test_index, ]
+train_set <- phish[-test_index, ]
+```
+
+Since, the data set is large (11,055 observations), an allotment of 50% of the observations for testing is feasible.
+Some of the machine learning algorithms will be described in the subsequent sections.  
+
+\newpage
+
+### Regresions
+Two kinds of regressions have been used: simple regression and logistic regression.    
+
+#### Simple Regression:
+For simple regression, one can input the train set as a categorical data. However, to allow more flexibility in the regression model, the categorical data is converted into numeric form. Hence, the data set (phish) is converted to numeric form using the following code:  
+
+```{r phish-numeric, message=FALSE, warning=FALSE}
+phish_numeric <- data.frame(apply(phish, 2, function(x) as.numeric(as.character(x))))
+```
+```{r phish-numeric-split, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+
+#Spliting the numeric dat set:
+set.seed(820, sample.kind = "Rounding")
+y<-phish_numeric$Result
+test_index <- createDataPartition(y, times = 1, p = 0.5, list = FALSE)
+test_set <- phish_numeric[test_index, ]
+train_set <- phish_numeric[-test_index, ]
+```
+
+Next, a simple regression can be used on the train set as follows:  
+
+```{r simple-regression-model, message=FALSE, warning=FALSE}
+lm_fit <- lm(Result ~ ., data = train_set)
+p_hat <- predict(lm_fit, test_set)
+```
+
+The predicted outcomes are obtained as continuous numbers, instead of the original discrete values '-1' and '1'. So, it becomes important to use a suitable decision rule to classify the values in p_hat. The following graph has been made to determine the cut-off:   
+
+&nbsp;
+```{r simple-regression-graph, message=FALSE, warning=FALSE, echo=FALSE, out.width="50%", fig.align="center"}
+
+#Defining d (the cut off value)
+d<-seq(-1, 1, length=100)
+
+#Making the required function which takes input as 'd' and returns the accuracy on the train set.
+decision_function<-function(d){
+  p_hat <- predict(lm_fit, train_set)
+  y_hat <- ifelse(p_hat > d, 1, -1) %>% factor()
+ytrain<-as.factor(train_set$Result)
+confusionMatrix(y_hat, ytrain)$overall["Accuracy"]
+}
+
+#Applying the function to different values of d to make a data frame.
+df<-data.frame(d=d, accuracy=sapply(d, decision_function)) 
+
+#Plotting the data frame:
+ggplot(df, aes(d, accuracy)) +
+  geom_line() +
+  labs(title="Variation of Accuracy with Value of d") +
+  geom_vline(xintercept = 0, col="red")+
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.x = element_text(size=9),
+        axis.text.y = element_text(size=9))
+```
+&nbsp;
+&nbsp;
+
+From the graph, it is evident that the accuracy on the train set is maximized when d is close to 0. This value of d is used to calculate the accuracy on the test set.  
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+p_hat <- predict(lm_fit, test_set)
+```
+```{r simple-regression-test-accuracy, message=FALSE, warning=FALSE}
+d <- 0
+y_hat <- ifelse(p_hat >= d, 1, -1) %>% factor()
+ytest <- as.factor(test_set$Result)
+confusionMatrix(y_hat, ytest)
+```
+
+```{r simple-regression-vector-of-predictions, message=FALSE, warning=FALSE, echo=FALSE}
+#Accuracy on test set:
+test_accuracy_lm<-confusionMatrix(y_hat, ytest)$overall["Accuracy"]
+#F1-Score on test Set:
+test_f1score_lm<-F1_Score(y_hat, ytest)
+
+#Accuracy on train set:
+p_hat <- predict(lm_fit, train_set)
+d<-0
+y_hat <- ifelse(p_hat >= d, 1, -1) %>% factor()
+ytrain<-as.factor(train_set$Result)
+train_accuracy_lm<-confusionMatrix(y_hat, ytrain)$overall["Accuracy"]
+
+#Creating a vector of predictions:
+predictions_lm<-c(train_accuracy_lm, test_accuracy_lm, test_f1score_lm)
+#These vectors of prediction (consisting of accuracy on test set, F1 score on test set, and accuracy on train set) will be created for every algorithm. They wiull be compiled in a plot at the end (in the results section)
+```
+
+
+An accuracy of 92.2% is obtained using this model.  
+&nbsp;
+
+#### Logistic Regression:  
+
+Logistic regression requires the outcome to have values between 0 and 1. So prior to using logistic regression, the data set is manipulated to make all values between 0 and 1. Hence, the '-1' is converted into '0', and '0' into '0.5'. In addition, the data set is again converted to numeric form for more flexibility. The final model can be run as follows:  
+
+
+```{r phish-logistic-split, message=FALSE, warning=FALSE, echo=FALSE}
+#Manipulating the data set to convert all values between '0' and '1'
+phish_numeric <- data.frame(apply(phish, 2, function(x) as.numeric(as.character(x))))
+phish_numeric[phish_numeric == "0"] <- 0.5
+phish_numeric[phish_numeric == "-1"] <- 0
+phish_numeric <- data.frame(apply(phish_numeric, 2, function(x) as.numeric(as.character(x))))
+
+set.seed(820, sample.kind = "Rounding")
+y<-phish_numeric$Result
+test_index <- createDataPartition(y, times = 1, p = 0.5, list = FALSE)
+test_set <- phish_numeric[test_index, ]
+train_set <- phish_numeric[-test_index, ]
+
+```
+```{r logistic-regression-model, message=FALSE, warning=FALSE}
+glm_fit <- glm(Result ~ ., data=train_set, family = "binomial")
+p_hat <- predict(glm_fit, test_set)
+```
+
+However, the predicted values are again obtained as continuous numbers, instead of the original discrete values. So, a decision rule is used, whose cut-off value can be determined from the following graph:  
+
+&nbsp;
+```{r logistic-regression-decision-rule-plot, message=FALSE, warning=FALSE, echo=FALSE, out.width="50%", fig.align="center"}
+#Defining d (the cut-off value)
+d<-seq(0, 1, length=100)
+
+#Making the required function which takes input as 'd' and returns the accuracy on the train set.
+decision_function<-function(d){
+  p_hat <- predict(glm_fit, train_set, type = "response")
+  y_hat <- ifelse(p_hat > d, 1, -1) %>% factor()
+  ytrain<-as.factor(phish[-test_index, ]$Result)
+  confusionMatrix(y_hat, ytrain)$overall["Accuracy"]
+}
+
+#Creating a data frame after applying the function:
+df<-data.frame(d=d, accuracy=sapply(d, decision_function)) 
+
+#Generating the plot:
+ggplot(df, aes(d, accuracy)) +
+  geom_line() +
+  labs(title="Variation of Accuracy with Value of d") +
+  geom_vline(xintercept = 0.5, col="red")+
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.x = element_text(size=9),
+        axis.text.y = element_text(size=9))
+```
+&nbsp;
+&nbsp;
+
+From the graph, it is evident that the accuracy on the train set is maximized when d is close to 0.5. This value of d is used to calculate the accuracy on the test set:    
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+p_hat <- predict(glm_fit, test_set)
+```
+```{r test-accuracy-logistic-regression, message=FALSE, warning=FALSE}
+d <- 0.5
+y_hat <- ifelse(p_hat >= d, 1, -1) %>% factor()
+ytest <- as.factor(phish[test_index, ]$Result)
+confusionMatrix(y_hat, ytest)
+```
+
+```{r logistic-regression-vector-of-predictions, message=FALSE, warning=FALSE, echo=FALSE}
+#Accuracy on test set:
+test_accuracy_glm<-confusionMatrix(y_hat, ytest)$overall["Accuracy"]
+#F1 Score on test set:
+test_f1score_glm<-F1_Score(y_hat, ytest)
+
+#Accuracy on train set:
+p_hat <- predict(glm_fit, train_set, type = "response")
+d<-0.5
+y_hat <- ifelse(p_hat >= d, 1, -1) %>% factor()
+ytrain<-as.factor(phish[-test_index, ]$Result)
+train_accuracy_glm<-confusionMatrix(y_hat, ytrain)$overall["Accuracy"]
+
+#Creating a vector of predictions:
+predictions_glm<-c(train_accuracy_glm, test_accuracy_glm, test_f1score_glm)
+```
+
+An accuracy of 91.99% is obtained using this model.  
+
+\newpage
+
+### k-nearest neighbors (knn)
+knn can be implemented using the following code:  
+
+```{r knn-split-data, message=FALSE, warning=FALSE, echo=FALSE}
+set.seed(820, sample.kind = "Rounding")
+y<-phish$Result
+test_index <- createDataPartition(y, times = 1, p = 0.5, list = FALSE)
+test_set <- phish[test_index, ]
+train_set <- phish[-test_index, ]
+set.seed(820, sample.kind = "Rounding")
+```
+```{r knn-model, message=FALSE, warning=FALSE, eval=FALSE}
+train_knn <- train(Result ~ ., method = "knn", 
+                   data = train_set)
+```
+
+However, to improve the performance of the algorithms, the value of k (a parameter that defines the number of nearest neighbors to include in the algorithm) 
+can be manipulated as follows:
+
+```{r knn-model-controlled,  message=FALSE, warning=FALSE}
+train_knn <- train(Result ~ ., method = "knn", 
+                   data = train_set,
+                   tuneGrid = data.frame(k = seq(3, 21, 2)))
+```
+
+The following plot shows the accuracy of the algorithm on the train set for different values of k:  
+
+&nbsp;
+```{r knn-graph, message=FALSE, warning=FALSE, echo=FALSE, out.width="50%", fig.align="center"}
+#Making plot of k vs accuracy on train set:
+ggplot(train_knn) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title="Accuracy vs k",
+       x="k",
+       y="Accuracy")
+```
+&nbsp;
+&nbsp;
+
+The value of k that maximizes accuracy on the train set is obtained by:  
+
+```{r knn-best-k,  message=FALSE, warning=FALSE}
+train_knn$bestTune
+```
+
+The algorithm is now applied on the test set.
+
+```{r knn-testing-accuracy, message=FALSE, warning=FALSE}
+set.seed(820, sample.kind = "Rounding")
+y_hat <- predict(train_knn, test_set, type = "raw") 
+ytest <- as.factor(test_set$Result)
+confusionMatrix(y_hat, ytest)
+```
+
+```{r knn-vector-of-predictions, message=FALSE, warning=FALSE, echo=FALSE}
+#Accuracy on test set:
+test_accuracy_knn<-confusionMatrix(y_hat, ytest)$overall["Accuracy"]
+#F1 Score on test set
+test_f1score_knn<-F1_Score(y_hat, ytest)
+
+#Accuracy on train set:
+set.seed(820, sample.kind = "Rounding")
+y_hat<-predict(train_knn, train_set, type = "raw") 
+ytrain<-as.factor(train_set$Result)
+train_accuracy_knn<-confusionMatrix(y_hat, ytrain)$overall["Accuracy"]
+
+#Creating a vector of predictions:
+predictions_knn<-c(train_accuracy_knn, test_accuracy_knn, test_f1score_knn)
+```
+
+An accuracy of 93.8% is obtained using this model.  
+
+\newpage
+
+### Support Vector Machines  
+Support Vector Machines can be used in the following way:  
+
+```{r svm-split-data, message=FALSE, warning=FALSE, echo=FALSE}
+set.seed(820, sample.kind = "Rounding")
+y<-phish$Result
+test_index <- createDataPartition(y, times = 1, p = 0.5, list = FALSE)
+test_set <- phish[test_index, ]
+train_set <- phish[-test_index, ]
+set.seed(820, sample.kind = "Rounding")
+```
+```{r svm-model, message=FALSE, warning=FALSE}
+train_svm <- train(Result ~ ., method = "svmLinearWeights2", 
+                   data = train_set)
+```
+
+The algorithm is applied on the test set.  
+
+```{r svm-testing-accuracy, message=FALSE, warning=FALSE}
+set.seed(820, sample.kind = "Rounding")
+y_hat <- predict(train_svm, test_set, type = "raw") 
+ytest <- as.factor(test_set$Result)
+confusionMatrix(y_hat, ytest)
+```
+
+```{r svm-vector-of-predictions, message=FALSE, warning=FALSE, echo=FALSE}
+#Accuracy on test set:
+test_accuracy_svm<-confusionMatrix(y_hat, ytest)$overall["Accuracy"]
+#F1 Score on test set:
+test_f1score_svm<-F1_Score(y_hat, ytest)
+
+#Accuracy on train set:
+set.seed(820, sample.kind = "Rounding")
+y_hat<-predict(train_svm, train_set, type = "raw") 
+ytrain<-as.factor(train_set$Result)
+train_accuracy_svm<-confusionMatrix(y_hat, ytrain)$overall["Accuracy"]
+
+#Creating a vector of predictions:
+predictions_svm<-c(train_accuracy_svm, test_accuracy_svm, test_f1score_svm)
+```
+
+An accuracy of 93.51% is obtained using this model.  
+
+\newpage
+
+### Gradient Boosting Machines  
+Gradient Boosting Machines can be used in the following way:  
+
+```{r gbm-split-data, message=FALSE, warning=FALSE, echo=FALSE}
+set.seed(820, sample.kind = "Rounding")
+y<-phish$Result
+test_index <- createDataPartition(y, times = 1, p = 0.5, list = FALSE)
+test_set <- phish[test_index, ]
+train_set <- phish[-test_index, ]
+set.seed(820, sample.kind = "Rounding")
+```
+```{r gbm-model, message=FALSE, warning=FALSE}
+fitControl <- trainControl(method = "repeatedcv", number = 4, repeats = 4)
+train_gbm <- train(Result ~ ., data = train_set, 
+                   method = "gbm", verbose = FALSE, trControl = fitControl)
+```
+
+Here, cross validation (4 fold, repeated 4 times) has been used. In other words, the data set is first randomly spit into 4 parts. Each of these 4 parts is used for testing, while the other 3 parts are used for training. The entire process is repeated 4 times.  Cross validation deters overfitting of the model. It is particularly useful here since gradient boosting machines can be prone to over fitting.
+
+The algorithm is applied on the test set. 
+
+```{r gbm-testing-accuracy, message=FALSE, warning=FALSE}
+set.seed(820, sample.kind = "Rounding")
+y_hat <- predict(train_gbm, test_set, type = "raw") 
+ytest <- as.factor(test_set$Result)
+confusionMatrix(y_hat, ytest)
+```
+
+```{r gbm-vector-of-predictions, message=FALSE, warning=FALSE, echo=FALSE}
+#Accuracy on test set:
+test_accuracy_gbm<-confusionMatrix(y_hat, ytest)$overall["Accuracy"]
+#F1 Score on test set:
+test_f1score_gbm<-F1_Score(y_hat, ytest)
+
+#Accuracy on train set:
+set.seed(820, sample.kind = "Rounding")
+y_hat<-predict(train_gbm, train_set, type = "raw") 
+ytrain<-as.factor(train_set$Result)
+train_accuracy_gbm<-confusionMatrix(y_hat, ytrain)$overall["Accuracy"]
+
+#Creating a vector of predictions:
+predictions_gbm<-c(train_accuracy_gbm, test_accuracy_gbm, test_f1score_gbm)
+```
+
+An accuracy of 93.83% is obtained using this model.  
+
+\newpage
+
+### Decision Tree
+
+Decision trees are helpful in visualizing and representing decision making, particularly for categorical variables. For the given data set, a decision tree can be easily created using the following code:
+
+```{r decision-tree-split-data, message=FALSE, warning=FALSE, echo=FALSE}
+set.seed(820, sample.kind = "Rounding")
+y<-phish$Result
+test_index <- createDataPartition(y, times = 1, p = 0.5, list = FALSE)
+test_set <- phish[test_index, ]
+train_set <- phish[-test_index, ]
+set.seed(820, sample.kind = "Rounding")
+```
+
+Following is the constructed decision tree.  
+
+&nbsp;
+```{r decision-tree-plot-a, message=FALSE, warning=FALSE, echo=FALSE, results='hide'}
+dir.create(file.path(getwd(), "figures"))
+png("figures/decision-tree.png", res=144, pointsize = 0.5,  height=1500, width=4000)
+output.tree<-ctree(Result~., data=train_set)
+plot(as.simpleparty(output.tree),
+     tp_args = list(FUN = function(info)
+       format(info$prediction, nsmall = 1)))
+dev.off()
+
+#Note: Here, a rather cumbersome method of plotting has been used. This is because of the large size of the decision tree. The png() function allows one to manipulate the resolution, point size and various other parameters that have been exploited for enhancing the representation of the decision tree. The usage on png() reguires the plot to be saved as an image. Hence a sub directory is created to store the plot, which is then loaded as shown below:
+```
+```{r decision-tree-plot-b, message=FALSE, warning=FALSE, echo=FALSE, out.width="100%", fig.align="center"}
+knitr::include_graphics("figures/decision-tree.png")
+unlink("figures")
+```
+
+&nbsp;
+&nbsp;
+
+The algorithm is now applied on the test set.  
+
+```{r decision-tree-testing-accuracy, message=FALSE, warning=FALSE}
+set.seed(820, sample.kind = "Rounding")
+y_hat <- predict(output.tree, test_set) 
+ytest <- as.factor(test_set$Result)
+confusionMatrix(y_hat, ytest)
+```
+
+```{r decision-tree-vector-of-predictions, message=FALSE, warning=FALSE, echo=FALSE}
+#Accuracy on test set:
+test_accuracy_decisiontree<-confusionMatrix(y_hat, ytest)$overall["Accuracy"]
+#F1 Score on test set:
+test_f1score_decisiontree<-F1_Score(y_hat, ytest)
+
+#Accuracy on train set:
+set.seed(820, sample.kind = "Rounding")
+y_hat<-predict(output.tree, train_set) 
+ytrain<-as.factor(train_set$Result)
+train_accuracy_decisiontree<-confusionMatrix(y_hat, ytrain)$overall["Accuracy"]
+
+#Creating a vector of predictions:
+predictions_decisiontree<-c(train_accuracy_decisiontree, test_accuracy_decisiontree, test_f1score_decisiontree)
+```
+An accuracy of 93.54% is obtained using this model.  
+
+\newpage
+
+### Random Forest
+Random forests are an ensemble of several decision trees (based on the bagging method). These decision trees can be trained from different subsets of the train set. The following code constructs a random forest for the train set.
+
+```{r random-forest-split-data, message=FALSE, warning=FALSE, echo=FALSE}
+set.seed(820, sample.kind = "Rounding")
+y<-phish$Result
+test_index <- createDataPartition(y, times = 1, p = 0.5, list = FALSE)
+test_set <- phish[test_index, ]
+train_set <- phish[-test_index, ]
+set.seed(820, sample.kind = "Rounding")
+```
+```{r random-forest-train-data, message=FALSE, warning=FALSE}
+train_rf <- train(Result ~ .,
+                    method = "Rborist",
+                    tuneGrid = data.frame(predFixed = 2, minNode = c(3, 50)),
+                    data = train_set)
+
+```
+
+Here, algorithms based on the different values of the minimum node size have been built. A plot of these values against the accuracy on the train set is shown below.  
+
+&nbsp;
+```{r random-forest-plot, message=FALSE, warning=FALSE, echo=FALSE, out.width="50%", fig.align="center"}
+#Plotting accuracy vs minimum node size:
+ggplot(train_rf)  +
+  theme(plot.title = element_text(hjust = 0.5, size=12),
+        axis.text.x = element_text(size=9),
+        axis.text.y = element_text(size=9)) +
+  labs(title="Accuracy vs Minimal Node Size")
+```
+&nbsp;
+&nbsp;
+
+The algorithm is applied on the test set.   
+
+```{r random-forest-testing-accuracy, message=FALSE, warning=FALSE}
+set.seed(820, sample.kind = "Rounding")
+y_hat <- predict(train_rf, test_set, type = "raw") 
+ytest <- as.factor(test_set$Result)
+confusionMatrix(y_hat, ytest)
+```
+
+```{r random-forest-vector-of-predictions, message=FALSE, warning=FALSE, echo=FALSE}
+#Accuracy on test set:
+test_accuracy_rf<-confusionMatrix(y_hat, ytest)$overall["Accuracy"]
+#F1 Score set:
+test_f1score_rf<-F1_Score(y_hat, ytest)
+
+#Accuracy on train set:
+set.seed(820, sample.kind = "Rounding")
+y_hat<-predict(train_rf, train_set, type = "raw") 
+ytrain<-as.factor(train_set$Result)
+train_accuracy_rf<-confusionMatrix(y_hat, ytrain)$overall["Accuracy"]
+
+#Creating a vector of predictions:
+predictions_rf<-c(train_accuracy_rf, test_accuracy_rf, test_f1score_rf)
+```
+An accuracy of 93.81% is obtained using this model.  
+
+The importance given to the different predictors in this algorithm can be visualized through the plot below:  
+
+&nbsp;
+```{r varaiable-importance, message=FALSE, warning=FALSE, echo=FALSE, out.width="70%", fig.align="center"}
+#Plotting the variable importance:
+ggplot(varImp(train_rf)) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title="Variable Importance")
+```
+&nbsp;
+&nbsp;
+
+\newpage
+
+### Ensemble  
+
+Ensembling is the final strategy that will be used in this project to maximize the accuracy on the test set. For ensemble, the four algorithms that have yield maximum accuracy on the train set will be used (since it is presumed that the outcome on the test set is unknown). The following graphs plots the accuracy on the train set for the algorithms that have been used so far.  
+
+&nbsp;
+```{r train-accuracy-plot, message=FALSE, warning=FALSE, echo=FALSE, out.width="75%", fig.align="center"}
+#Making a data frame for accuracy on train set for each of the algorithms by utilixzing the vectors of predictions:
+values<-c("train_accuracy", "test_accuracy", "test_f1score")
+algorithm_predictions<-data.frame(lm=predictions_lm, 
+                                  glm=predictions_glm, 
+                                  knn=predictions_knn,
+                                  svm=predictions_svm,
+                                  gbm=predictions_gbm, 
+                                  decisiontree=predictions_decisiontree,
+                                  rf=predictions_rf)
+algorithm_predictions<-as.data.frame(t(as.matrix(algorithm_predictions)))
+colnames(algorithm_predictions)<-values
+algorithm<-c("Linear Regression", "Logistic Regression", "k-nearest neigbours", "Support Vector Machines", "Gradient Boosting Machines", "Decision Tree", "Random Forest")
+algorithm_predictions<-cbind(algorithm, algorithm_predictions)
+rownames(algorithm_predictions) <- NULL
+
+#Making a lollipop plot for the same:
+algorithm_predictions %>% mutate(algorithm=reorder(algorithm,train_accuracy)) %>% 
+  ggplot(aes(x=algorithm, y=train_accuracy, label=(round(train_accuracy, 4)) )) +
+  geom_segment(aes(x=algorithm, xend=algorithm, y=0, yend=train_accuracy)) +
+  geom_point() +
+  geom_point(size=5, color="red", fill=alpha("orange", 0.3), alpha=0.7) + 
+  geom_text( position = position_nudge(y = 0.1), size=3.5) +
+  coord_flip() +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.x = element_text(size=9),
+        axis.text.y = element_text(size=9)) +
+  labs(title="Accuracy on Train Set by Different Algorithms",
+       x="Algorithm",
+       y="Accuracy on Train Set")
+```
+&nbsp;
+&nbsp;
+
+It is important to note that decision trees are excluded from the ensemble model since random forest is already a bagging ensemble of decision trees. Hence, the four algorithms that are chosen for the ensemble are k-nearest neighbors, Support Vector Machines, Gradient Boosting Machines and Random Forest. The following codes make and run the required algorithm.  
+
+```{r ensemble-split-dat, message=FALSE, warning=FALSE, echo=FALSE}
+set.seed(820, sample.kind = "Rounding")
+y <- phish$Result
+test_index <- createDataPartition(y, times = 1, p = 0.5, list = FALSE)
+test_set <- phish[test_index, ]
+train_set <- phish[-test_index, ]
+set.seed(820, sample.kind = "Rounding")
+```
+
+```{r ensemble-model, message=FALSE, warning=FALSE, results='hide'}
+#Generating the models:
+models <- c("rf", "gbm", "knn", "svmLinearWeights2")
+set.seed(820, sample.kind = "Rounding")
+fits <- lapply(models, function(model){ 
+  print(model)
+  train(Result ~ ., method = model, data = train_set)})
+
+#Applying the models on the test set and creating a data frame:
+set.seed(820, sample.kind = "Rounding")
+mod <- sapply(fits, function(fit){
+  predict(fit, test_set)})
+mod <- as.data.frame(mod, stringsAsFactors =TRUE)
+colnames(mod) <- models
+```
+
+The above code creates a table of predictions made by each of the 4 algorithms for every set of observed features in the test set. The head of the table can be viewed below:  
+
+```{r ensemble-data-set, echo=FALSE, message=FALSE, warning=FALSE}
+library(kableExtra)
+kbl(head(mod), longtable=T, booktabs=T, caption="First 6 Rows of the Data Set Mod") %>%
+  column_spec(1:3, width="2cm") %>%
+  column_spec(4, width="3.5cm") %>%
+  kable_styling(latex_options=c("repeat_header"))
+```
+
+The final predictions are then made based on the frequency of the predicted outcome by each of these algorithms. In case of a tie i.e. two of the algorithms predict '1' and two others predict '-1', importance is given to '1' based on the fact that the prevalence of '-1' is slightly less than 0.5 in the train set.
+
+```{r ensemble-testing-accuracy, message=FALSE, warning=FALSE}
+mod_final <- mod %>% mutate(prop_1 = rowSums((mod == 1)/4)) %>%
+  mutate(final_pred = ifelse(prop_1 >= 0.5,1,-1)) %>% select(-prop_1)
+set.seed(820, sample.kind = "Rounding")
+y_hat <- as.factor(mod_final$final_pred)
+ytest <- as.factor(test_set$Result)
+confusionMatrix(y_hat, ytest)
+```
+
+```{r ensemble-vector-of-predictions, message=FALSE, warning=FALSE, echo=FALSE}
+#Accuracy on test set
+test_accuracy_ensemble<-confusionMatrix(y_hat, ytest)$overall["Accuracy"]
+#F1 Score on test set:
+test_f1score_ensemble<-F1_Score(y_hat, ytest)
+
+#Creating a vector of predictions:
+predictions_ensemble<-c(test_accuracy_ensemble, test_f1score_ensemble) #Excludes train accuracy as now it is irrelevant.
+```
+An accuracy of 93.98% is obtained using this model.  
+
+\newpage
+
+### Weighted Ensemble
+Ensembles worked well. However, an assumption was made that since there are more '1'
+s in the data set, a prediction of '1' should be made in case of a tie. There are 121 such ties. But, from the users' point of view, preventing false negatives is important i.e. protecting a user from accessing a phishing website on the pretext that it is legitimate.  So it becomes important to change the strategy for these 121 instances. So, instead of basing the model on any assumption, a new technique has been implemented, wherein weights have been assigned to the models based on their accuracy on the train set. A new data frame with these weights is created and applied on the test set as follows:  
+
+```{r weighted-ensemble-model-testing, message=FALSE, warning=FALSE}
+#Creating the required data set
+set.seed(820, sample.kind = "Rounding")
+#Applying the model on train set:
+mod_train <- sapply(fits, function(fit){ predict(fit, train_set)})
+
+#Calculating model wise accuracy on train set:
+accuracy_model_wise <- colMeans(mod_train == train_set$Result)
+df_model <- data.frame(model = models, accuracy = accuracy_model_wise) 
+mod_weighted <- data.frame(apply(mod, 2, function(x) as.numeric(as.character(x))))
+
+mod_weighted$rf <- (mod_weighted$rf) * 
+  ((df_model %>% filter(model == "rf") %>% select(accuracy))[1,1])
+mod_weighted$gbm <- (mod_weighted$gbm) * 
+  ((df_model %>% filter(model == "gbm") %>% select(accuracy))[1,1])
+mod_weighted$knn <- (mod_weighted$knn) * 
+  ((df_model %>% filter(model == "knn") %>% select(accuracy))[1,1])
+mod_weighted$svmLinearWeights2 <- (mod_weighted$svmLinearWeights2) * 
+  ((df_model %>% filter(model == "svmLinearWeights2") %>% 
+      select(accuracy))[1,1])
+
+#Final predictions are calculated:
+mod_weighted_final <- mod_weighted %>% mutate(rm = rowMeans(mod_weighted)) %>%
+  mutate(final_pred = ifelse(rm>=0,1,-1)) %>% select(-rm)
+
+#Appliance of the algorithm on test set:
+y_hat <- as.factor(mod_weighted_final$final_pred)
+ytest <- as.factor(test_set$Result)
+confusionMatrix(y_hat, ytest)
+```
+
+```{r weighted-ensemble-vector-of-predictions, message=FALSE, warning=FALSE, echo=FALSE}
+#Accuracy on test set:
+test_accuracy_weighted_ensemble<-confusionMatrix(y_hat, ytest)$overall["Accuracy"]
+#F1 Score on test set:
+test_f1score_weighted_ensemble<-F1_Score(y_hat, ytest)
+
+#Creating a vector of predictions:
+predictions_weighted_ensemble<-c(test_accuracy_weighted_ensemble, test_f1score_weighted_ensemble) #Excludes train accuracy as now it is irrelevant.
+```
+An accuracy of 94.05% is obtained using this model.  
+
+\newpage
+
+## Results  
+
+All the algorithms that have been used have given different accuracies. The following graph compares the accuracies on the test set for these algorithms.   
+
+```{r comparison-frame, message=FALSE, warning=FALSE, echo=FALSE }
+#Making the required data set using the vector of predictions created for every algorithm:
+values<-c("test_accuracy", "test_f1score")
+algorithm_predictions<-data.frame(lm=predictions_lm, 
+                                  glm=predictions_glm, 
+                                  knn=predictions_knn,
+                                  svm=predictions_svm,
+                                  gbm=predictions_gbm, 
+                                  decisiontree=predictions_decisiontree,
+                                  rf=predictions_rf)
+algorithm_predictions<-as.data.frame(t(as.matrix(algorithm_predictions)))[,-1] %>% rbind(predictions_ensemble, predictions_weighted_ensemble)
+colnames(algorithm_predictions)<-values
+algorithm<-c("Linear Regression", "Logistic Regression", "k-nearest neigbours", "Support Vector Machines", "Gradient Boosting Machines", "Decision Tree", "Random Forest", "Ensemble", "Weighted Ensemble")
+algorithm_predictions<-cbind(algorithm, algorithm_predictions)
+rownames(algorithm_predictions) <- NULL
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, out.width="75%", fig.align="center"}
+#PLOT OF ACCURACY IN TEST SET FOR EACH ALGORITHM:
+algorithm_predictions %>% mutate(algorithm=reorder(algorithm,test_accuracy)) %>% 
+  ggplot(aes(x=algorithm, y=test_accuracy, label=(round(test_accuracy, 4)) )) +
+  geom_segment(aes(x=algorithm, xend=algorithm, y=0, yend=test_accuracy)) +
+  geom_point() +
+  geom_point(size=5, color="red", fill=alpha("orange", 0.3), alpha=0.7) + 
+  geom_text( position = position_nudge(y = 0.1), size=3.5) +
+  coord_flip() +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.x = element_text(size=9),
+        axis.text.y = element_text(size=9)) +
+  labs(title="Accuracy on Test Set by Different Algorithms",
+       x="Algorithm",
+       y="Accuracy on Test Set")
+```
+
+To get an idea about the balance between precision and recall, it becomes imperative to know the F1-Scores. The following graph compares the F1-Scores on the test set for the algorithms.  
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, out.width="75%", fig.align="center"}
+#PLOT OF F1-SCORE IN TEST SET FOR EACH ALGORITHM:
+algorithm_predictions %>% mutate(algorithm=reorder(algorithm,test_f1score)) %>% 
+  ggplot(aes(x=algorithm, y=test_f1score, label=(round(test_f1score, 4)) )) +
+  geom_segment(aes(x=algorithm, xend=algorithm, y=0, yend=test_f1score)) +
+  geom_point() +
+  geom_point(size=5, color="red", fill=alpha("orange", 0.3), alpha=0.7) + 
+  geom_text( position = position_nudge(y = 0.1), size=3.5) +
+  coord_flip() +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.x = element_text(size=9),
+        axis.text.y = element_text(size=9)) +
+  labs(title="F1-Score on Test Set by Different Algorithms",
+       x="Algorithm",
+       y="F1-Score on Test Set")
+```
+
+From these plots, it is evident that weighted ensemble has given the maximum accuracy of 94.05% on the test set.  
+
+\newpage
+
+## Conclusion  
+
+Throughout the project, a variety of algorithms have been used, giving different measures of accuracy, precision and recall. Among the various algorithms, the weighted ensemble has yielded an accuracy of 94.05% on the test set. Both sensitivity and specificity are high, indicating a balanced performance.   
+
+Meanwhile, it is imperative to recognize the limitations of the project. Firstly, the computational time for some algorithms, particularly the ensemble models, is quite high (around 15-20 minutes). Secondly, the usage of these algorithms requires the users to make careful, detailed observations of websites, thereby making the utility cumbersome. Finally, the accuracy of the algorithm is limited due to a lack of predictors having a significant correlation with the outcome.  
+
+### Future Considerations  
+
+To improve upon the performance of the algorithms, it is suggested that the algorithms be constantly retrained on fresh data sets. A possible future development could be to construct a platform which directly predicts website legitimacy without requiring the users to manually enter values for the predictors. Such a platform would have to read a website's URL, classify the different components, and then fill in the values for the features based on pre-defined rules. In addition, adaptive sorting algorithms can be developed to exploit the properties of a data set to greatly reduce computational time. Finally, new predictors can be explored to enhance the accuracy of the algorithms.  
+
+\newpage
+
+## References  
+
+1. 'Introduction to Data Science: Data Analysis and Prediction Algorithms with R' by Rafael A. Irizarry
+2. 'R Markdown Cookbook' by Yihui Xie, Christophe Dervieux, and Emily Riederer
+3. 'R Markdown: The Definitive Guide' by Yihui Xie, J. J. Allaire, and Garrett Grolemund
+
+
+
+
+
